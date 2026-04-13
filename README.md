@@ -53,9 +53,7 @@ This is a brief summary of the files and their use.
 - TnCentral_Results_Clean_and_Plot.py : processes TnCentral Blast results, makes a plot of cleaned hits aligned to a gene map of the contig with hits coloured by bitscore.
 ## D: Toxin-antitoxin-Systems
 - filter_clean_tadb_results.py: cleans and filters Toxin Antitoxin Database results.
-## E: Base annotation CSV generation
-- split_data_by_contig.py: Splits the Bakta output, AMR and virulence results by contig to facilitate annotation csv generation in Excel. 
-## F: Processing of BlastN (plasmid1) results  
+## E: Processing of BlastN (plasmid1) results  
 - GENE_extract_from_blast_out.py: Takes the genbank output of a blastN search, searches for accessions containing a specific “GENE”, extracts these accessions with their metadata and creates filtered genbank and fasta files for just these accessions.
 - Process_local_blast_CS12ctxm15region_in_CTXM_plasmids.py: takes output of a local blastN of the CTXM15 region from the chromosome of CS1.2 (query) against a database of CTXM15-containing plasmid homologue hits. Adds in metadata. Flags those containing NDM5, filters out chromosomal hits and filters for high identity hits with available dates. 
 
@@ -64,4 +62,10 @@ This is a brief summary of the files and their use.
 - plasmid_pycirclize_map.py: Pycirclize circos plot of plasmid based on flagged annotation CSV
 - BRIG_multi_arrows.py: Create BRIG-like plots for plasmids
 - Chromosome_GC_plot_final.py: Create a pyCirclize circos plot of the chromosome with GC content and AMR/ virulence feature flags
-- pling_plasmid_distance_matrix.py: create a cluster heatmap from the Pling distance matrix 
+- pling_plasmid_distance_matrix.py: create a cluster heatmap from the Pling distance matrix
+
+# Supplementary
+- split_data_by_contig.py: Splits the Bakta output, AMR and virulence results by contig to facilitate annotation csv generation in Excel.
+- Flagged annotation CSVs used for plotting in this project
+- Fasta files for the final assembly (full), the chromosome and the IncF plasmid
+
