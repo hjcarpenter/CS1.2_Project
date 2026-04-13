@@ -1,0 +1,629 @@
+############ Set up #######################
+Windows Subsystem for Linux (2.6.1)
+Windows 11
+Ubuntu  22.04.4 LTS (GNU/Linux 4.4.0-26100-Microsoft x86_64) 
+conda 24.11.3
+channels: 
+  - conda-forge
+  - bioconda
+  - defaults
+
+########### Tools #######################
+NanoPlot 1.46.1
+Filtlong 0.3.1
+Autocycler 0.5.2
+	canu master +27 changes (r10515 2a41e933b8de6ed66723d75d36dd071b46d2c347)
+	flye 2.9.6-b1802
+	miniasm 0.3-r179
+	minimap2 2.30-r1287
+	minipolish v0.2.0
+	plassembler 1.8.1
+	racon 1.5.0
+	raven 1.8.3
+	GNU parallel 20250822 
+BUSCO 6.0.0
+QUAST 5.0.2
+Medaka 2.1.1 r1041_e82_400bps_sup_v4.3.0
+samtools 1.22.1+htslib-1.22.1
+bcftools 1.22
+Dnaapler 1.3.0 r1041_e82_400bps_sup_v4.3.0
+Seqkit  2.10.1
+CheckM 1.2.4, database v2015_01_16
+Bakta 1.11.0 db 6.0 full
+PlasmidFinder 2.1.6, database 2.2.0
+Mob Suite 3.1.9
+PlasmidVerify ABLAb, commit bd2c0dffd5
+RefSeqMasher 0.1.2
+MLST 2.0.9, database 2023-09-15
+AMRFinderPlus 4.0.23, database v2025-07-16.1
+hAMRonization 1.1.9
+MobileElementFinder 1.0.3, database 1.0.2
+IntegronFinder 2.0.6
+MUMmer 4.0.0rc1
+gnuplot 5.4.2
+pyCirclize 1.10.1
+clinker 0.0.32
+blastn: 2.16.0+
+pling: 2.0.2
+
+
+############## DATA DETAILS #########################
+
+Data basecalled using Dorado basecaller from the MinKnow platform: 
+basecall_model_version_id= dna_r10.4.1_e8.2_400bps_sup@v4.3.0
+	Analyte = DNA
+	Pore Type = r10.4.1 (flow cell FLO-MIN114/FLO-FLG114)
+	Chemistry type (kit for sequencing) = Kit 14 (e8.2)
+	Translocation speed: 400 bps. 
+	Model type (sup) = super accuracy model
+	Model version number: v4.3.0
+
+# raw data: CS1_2_cat.fq.gz
+
+# Check data for adaptors (these should have been removed in-platform)
+zcat CS1_2_cat.fq.gz | head -n 80 | awk 'NR%4==2' | cut -c 1-50
+
+############# QC and Filter Data ######################
+
+conda activate nanoporeqc
+
+### inspect outputs to inform filter settings ###
+# light filter
+filtlong --min_length 0.5kb --min_mean_q 10 \
+    CS1_2_cat.fq.gz \
+    > CS1_2_filtered_L500_Q10.fq
+# stronger filter
+filtlong --min_length 1kb --min_mean_q 10 \
+     CS1_2_cat.fq.gz \
+    > CS1_2_filtered_L1000_Q10.fq
+
+# QC filtered reads with Nanoplot #
+# a. --min_length 0.5kb
+NanoPlot --fastq CS1_2_filtered_L500_Q10.fq \
+         --loglength --N50 \
+         -o nanoplot_filtered_L500_Q10
+
+# b. --min_length 1kb
+NanoPlot --fastq CS1_2_filtered_L1000_Q10.fq \
+         --loglength --N50 \
+         -o nanoplot_filtered_L1000_Q10
+
+###  --> b. selected ###
+conda deactivate
+
+##################################
+##### ASSEMBLY: Autocycler   #####
+##################################
+
+conda activate autocycler
+
+# activate and run autocycler_bash script
+ chmod +x autocycler_bash.sh
+./autocycler_bash.sh "CS1_2_filtered_L1000_Q10.fq" 6 1
+
+conda deactivate
+
+###################################
+####   Pre-Polish QC            ####
+###################################
+conda activate medaka-env
+
+# Inputs
+ASM_PRE=consensus_assembly.fasta          # Autocycler output 
+READS=CS1_2_filtered_L1000_Q10.fq	  # reads used to make assembly
+BAM_PRE=pre_medaka_ont.bam
+
+###  CREATE A BAM FILE  
+
+# Map reads to the pre-polish assembly and sort
+minimap2 -ax map-ont "$ASM_PRE" "$READS" \
+  | samtools sort -o "$BAM_PRE"
+# Index BAM
+samtools index "$BAM_PRE"
+
+mkdir -p pre_medaka_qc
+
+###  QC FROM BAM      
+
+# Full mapping summaries
+samtools flagstat "$BAM_PRE" > pre_medaka_qc/flagstat.txt
+samtools stats "$BAM_PRE"   > pre_medaka_qc/ont.stats
+
+# Tidy SN table
+grep '^SN' pre_medaka_qc/ont.stats | cut -f2- | sed -E 's/: +/\t/' \
+  > pre_medaka_qc/ont.stats.SN.tsv
+
+# Per-contig mean depth
+samtools depth -a "$BAM_PRE" \
+| awk '{sum[$1]+=$3; n[$1]++} END{for (c in sum) printf "%s\t%.1f\n", c, sum[c]/n[c]}' \
+| sort > pre_medaka_qc/depth_mean.tsv
+
+# Depth histogram
+samtools depth -a "$BAM_PRE" \
+| awk '{h[$3]++} END{for (d in h) print d"\t"h[d]}' \
+| sort -n > pre_medaka_qc/depth_hist.tsv
+
+# Per-contig mapped read counts
+samtools idxstats "$BAM_PRE" > pre_medaka_qc/idxstats.tsv
+
+# Contig lengths from pre-polish FASTA
+samtools faidx "$ASM_PRE"
+cut -f1,2 "$ASM_PRE".fai > pre_medaka_qc/contig_lengths.tsv
+
+conda deactivate
+
+
+#  BUSCO #1
+######################
+conda activate busco-env
+
+busco \
+  -i consensus_assembly.fasta \
+  -l enterobacterales_odb10 \
+  -o busco_ecoli_out \
+  -m genome \
+  -c 8
+
+conda deactivate
+
+# QUAST #1
+####################
+conda activate quast-env
+# with reference
+quast consensus_assembly.fasta -r k12reference.fasta -o quast_out_K12_REF
+conda deactivate
+
+##############################
+##### POLISH: Medaka ######
+##############################
+conda activate medaka-env
+
+medaka_consensus \
+  -i CS1_2_filtered_L1000_Q10.fq \ # raw reads
+  -d consensus_assembly.fasta \    # autocycler output
+  -o medaka_out \
+  -t 16 \
+  -m r1041_e82_400bps_sup_v4.3.0
+
+conda deactivate
+
+###########################
+## Post-polish QC ########
+##########################
+conda activate medaka
+
+# Inputs
+ASM=medaka_out/consensus.fasta # polished assembly
+BAM=medaka_out/ont.bam  
+
+# Full mapping summaries
+samtools flagstat "$BAM" > medaka_out/flagstat.txt
+samtools stats "$BAM" > medaka_out/ont.stats
+
+# Tidy two-column table from the SN lines in samtools stats
+grep '^SN' medaka_out/ont.stats | cut -f2- | sed -E 's/: +/\t/' \
+  > medaka_out/ont.stats.SN.tsv
+# (col1=metric, col2=value)
+
+# Per-contig mean depth (table)
+samtools depth -a "$BAM" \
+| awk '{sum[$1]+=$3; n[$1]++} END{for (c in sum) printf "%s\t%.1f\n", c, sum[c]/n[c]}' \
+| sort > medaka_out/depth_mean.tsv
+# (contig\tmean_depth)
+
+# Depth histogram 
+samtools depth -a "$BAM" \
+| awk '{h[$3]++} END{for (d in h) print d"\t"h[d]}' \
+| sort -n > medaka_out/depth_hist.tsv
+# (depth\tcount_of_positions)
+
+# Per-contig mapped read counts & contig lengths
+samtools idxstats "$BAM" > medaka_out/idxstats.tsv
+# (contig\tlength\treads_mapped\treads_unmapped)
+
+# Contig lengths from the polished FASTA
+samtools faidx "$ASM"
+cut -f1,2 "$ASM".fai > medaka_out/contig_lengths.tsv
+
+conda deactivate
+
+
+#######################################
+## Reorient assembled contigs: Dnaapler
+####################################### 
+
+conda activate dnaapler_env
+
+# change contig IDs
+awk '
+  BEGIN{
+    FS="[ \t]"; OFS=" ";
+    map["1"]="chromosome";
+    map["2"]="plasmid1";
+    map["3"]="plasmid2";
+    map["4"]="plasmid3";
+    map["5"]="plasmid4";
+  }
+  /^>/{
+    name=$1; sub(/^>/,"",name);                 # first token without ">"
+    $1=">" ((name in map)? map[name]:name);      # replace only if in map
+    print; next
+  }
+  {print}
+' polished_assembly.fasta > polished_assembly_named.fasta
+
+# run dnaapler for the chromosome (ignore plasmids)
+dnaapler all \
+  -i polished_assembly_named.fasta \
+  -o dnaapler_chr_out \
+  -t 8 \
+  --ignore plasmid1,plasmid2,plasmid3,plasmid4
+
+# run dnaapler for the plasmids (ignore chromosome)
+dnaapler all \
+  -i polished_assembly_named.fasta \
+  -o dnaapler_plasmids_out \
+  -t 8 \
+  --ignore chromosome
+
+## Fasta manipulation with SeqKit: Create individual Fastas AND a new (reoriented) multifasta ##
+# filter out reoriented contigs
+# chromosome-only from reoriented fasta
+seqkit grep -n -r -p '^chromosome' dnaapler_reoriented_C.fasta > chromosome_only.fasta
+# plasmids only
+seqkit grep -n -r -p '^plasmid[0-9]+' dnaapler_reoriented_P.fasta > plasmids_only.fasta
+
+# rebuild a multifasta from the reoriented files:
+cat chromosome_only.fasta plasmids_only.fasta > all_reoriented.fasta
+
+# Create a folder containing separate fastas for downstream use
+seqkit split -i -O split_reoriented_fastas all_reoriented.fasta
+conda deactivate
+
+#########################################
+## Make a new BAM for the reoriented fasta
+#########################################
+
+# align fastq reads to reoriented fasta
+minimap2 -ax map-ont all_reoriented.fasta CS1_2_filtered_L1000_Q10.fq > reoriented_alignment.sam
+
+# sort and convert to BAM
+samtools sort -@ 4 reoriented_alignment.sam -o all_reoriented.bam
+
+# index the BAM file
+samtools index all_reoriented.bam
+
+#####################################
+# QC the Reoriented Assembly
+#####################################
+## STATS
+# Inputs
+ASM=all_reoriented.fasta # polished REORIENTED assembly
+BAM=all_reoriented.bam  
+
+# Full mapping summaries
+samtools flagstat "$BAM" > flagstat.txt
+samtools stats "$BAM" > ont.stats
+
+# Tidy two-column table from the SN lines in samtools stats
+grep '^SN' ont.stats | cut -f2- | sed -E 's/: +/\t/' \
+  > ont.stats.SN.tsv
+# (col1=metric, col2=value)
+
+# Per-contig mean depth (table)
+samtools depth -a "$BAM" \
+| awk '{sum[$1]+=$3; n[$1]++} END{for (c in sum) printf "%s\t%.1f\n", c, sum[c]/n[c]}' \
+| sort > depth_mean.tsv
+# (contig\tmean_depth)
+
+# Depth histogram 
+samtools depth -a "$BAM" \
+| awk '{h[$3]++} END{for (d in h) print d"\t"h[d]}' \
+| sort -n > depth_hist.tsv
+# (depth\tcount_of_positions)
+
+# Per-contig mapped read counts & contig lengths
+samtools idxstats "$BAM" > idxstats.tsv
+# (contig\tlength\treads_mapped\treads_unmapped)
+
+# Contig lengths from the polished FASTA
+samtools faidx "$ASM"
+cut -f1,2 "$ASM".fai > contig_lengths.tsv
+
+# Get GC per contig: seqkit
+seqkit fx2tab -n -g all_reoriented.fasta > individual_contig_stats.tsv
+
+## BUSCO #2
+################################
+conda activate busco-env
+busco \
+  -i all_reoriented.fasta \ 
+  -l enterobacterales_odb10 \
+  -o busco_ecoli_out \
+  -m genome \
+  -c 8
+conda deactivate
+
+#### QUAST #2
+###########################
+conda activate quast-env
+
+# no reference
+quast final_assembly.fasta -o quast_out # <--- note have renamed all_reoriented to final_assembly
+
+# with reference (E. coli K12)
+quast final_assembly.fasta -r k12reference.fasta -o quast_out_K12_REF
+
+####  CheckM
+#########################
+conda activate checkm
+
+# make a folder for assembly
+mkdir -p ./CheckM/bins
+cp ./CheckM/final_assembly.fasta \
+   ./CheckM/bins/bin1.fasta
+
+# Run
+checkm lineage_wf \
+    -x fasta \
+    --threads 8 \
+    ./CheckM/bins \
+    ./CheckM/checkm_output
+
+# summary
+checkm qa \
+  "checkm_output/lineage.ms" \
+  "checkm_output" \
+  -o 2 \
+  > "checkm_summary.tsv"
+
+
+##################################
+### PLASMIDS #####################
+##################################
+
+## PlasmidFinder:
+conda activate cge
+
+plasmidfinder.py \
+  -i all_reoriented.fna \
+  -o PlasmidFinder \
+  -p ./databases/plasmidfinder_db \
+  -t 0.95 \
+  -l 0.60
+
+# convert json to tsv
+jq -r '
+  .plasmidfinder.results["Enterobacteriales"]["enterobacteriales"]
+  | to_entries[]
+  | [
+      .value.contig_name,
+      .value.plasmid,
+      .value.accession,
+      .value.identity,
+      .value.coverage,
+      .value.HSP_length,
+      .value.template_length,
+      .value.positions_in_contig,
+      .value.position_in_ref
+    ]
+  | @tsv
+' data.json > results_tab.tsv
+
+conda deactivate
+
+## MOB-Suite:
+conda activate mob_suite
+mob_recon --infile all_reoriented.fasta --outdir mob_recon_results --num_threads 8
+conda deactivate
+
+## plasmidVerify:
+conda activate plasmidverify-env
+
+# Run plasmidVerify 
+./plasmidverify.py \
+  -f all_reoriented.fasta \
+  -o plasmidVerify_out \
+  --hmm ./databases/Pfam-A.hmm
+
+cp ./plasmidVerify_out/all_reoriented_result_table.csv ./results/PlasmidVerify/
+
+conda deactivate
+
+####################################
+# Strain Characterisation #########
+####################################
+
+## MLST:
+conda activate mlst-env
+mlst all_reoriented.fasta  > mlst_results.txt
+conda deactivate
+
+## RefSeq Masher
+conda activate refseq_masher-env
+
+mkdir -p refseq_masher_output
+refseq_masher -vv matches \
+  final_assembly.fasta \
+  -o ./refseq_masher_output/matches.tsv \
+  --output-type tab
+
+#############################
+# BAKTA Annotation #########
+############################
+conda activate bakta-env
+
+# INSDC-Compliant, KEEP contig names
+bakta \
+  --db ./bakta_db/db \
+  --output ./bakta_out \
+  --threads 8 \
+  --prefix bakta_CS1_2 \
+  --genus Escherichia \
+  --species coli \
+  --strain "CS1.2" \
+  --locus-tag CS12 \
+  --compliant \
+  --keep-contig-headers \
+  --force \
+  final_assembly.fasta
+
+# json stats summary csv
+jq -r '
+  .stats
+  | to_entries
+  | (["key","value"] | @csv),
+    (.[] | [ .key, (.value|tostring) ] | @csv)
+' bakta_CS1_2.json > bakta_summary.csv
+
+conda deactivate
+
+######################################
+#### Extract database-specific data from Bakta annotation
+#######################################
+# Virulence finder VFDB hits:
+awk 'BEGIN{FS=OFS="\t"} NR==1 || $0 ~ /VFDB:/ {print}' bakta_CS1_2.tsv > VFDB_hits.tsv
+
+# ISFinder hits:
+awk 'BEGIN{FS=OFS="\t"} NR==1 || $0 ~ /IS:/ {print}' bakta_CS1_2.tsv > isfinder_hits.tsv
+
+##########################
+# AMRFinderPlus ##########
+#########################
+conda activate amrfinder
+
+amrfinder \
+  -n final_assembly.fasta \
+  --organism Escherichia \
+  --plus \
+  --print_node \
+  -o amrfinder_plus_Ecoli.tsv
+conda deactivate
+
+####################################
+# hAMRonize: unify AMR outputs ############
+####################################
+conda activate hamronization310
+
+# run for each input source:
+# RGI
+hamronize rgi RGI_out.txt --input_file_name RGI_out.txt --reference_database_version 4.0.1 --analysis_software_version 6.0.5 --format tsv --output RGI_out_hAMR.tsv
+#AMRFinderPlus
+hamronize amrfinderplus amrfinder_plus_Ecoli.tsv --input_file_name amrfinderplus_out --reference_database_version 2025-07-16.1 --analysis_software_version 4.0.23 --format tsv --output amrfinder_plus_hAMR.tsv 
+# staramr DOESNT accept input file name  
+hamronize staramr resfinder.tsv \
+  --reference_database_version 2.4.0 \
+  --analysis_software_version Galaxy_0.11.1 \
+  --format tsv \
+  --output staramr_hAMR.tsv
+
+# Summarise:
+hamronize summarize \
+  -o combined_AMR_report.tsv \
+  -t tsv \
+  RGI_out_hAMR.tsv \
+  amrfinder_plus_hAMR.tsv \
+  staramr_hAMR.tsv
+conda deactivate
+
+#####################
+### integronfinder ######
+########################
+conda activate integronfinder-env
+
+integron_finder --local-max --func-annot --promoter-attI --pdf --gbk --keep-tmp --cpu 8 final_assembly.fasta
+conda deactivate
+
+###########################
+## Blastn Local Alignments
+###########################
+#E.g.#1 1:1 alignment
+# make a blast database from the reference seq:
+makeblastdb -in CS1_2_plasmid1.fasta -dbtype nucl -parse_seqids -out CS1_2_plasmid1_db
+# align query to reference
+blastn -query pCA28.fasta -db CS1_2_plasmid1_db \
+  -out bakta_pCA28_vs_CS1_2.blastn.tab \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore" \
+  -evalue 1e-10
+
+#E.g.#2 query against a multifasta database:
+makeblastdb \
+  -in sequence_CTXM_only.fasta \
+  -dbtype nucl \
+  -out CTXM_plasmids_db
+blastn \
+  -query query.fasta \
+  -db CTXM_plasmids_db \
+  -out query_vs_CTXM_plasmids.tsv \
+  -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore" \
+  -max_target_seqs 50 \
+  -evalue 1e-10
+
+
+############################
+# MUMmer NUCmer pairwise alignment
+###########################
+# FIRST: check fastas for hidden characters
+head -n 5 chromosome.fasta | cat -A
+head -n 5 sequence.fasta | cat -A
+# if present - convert to unix
+dos2unix chromosome.fasta sequence.fasta
+
+# example: CS1.2 v 675SK2
+# align
+nucmer --prefix=CS12_vs_strain_675SK2 chromosome.fasta sequence.fasta 
+
+# compute summary stats with dnadiff
+dnadiff -p CS12_vs_strain_675SK2 -d CS12_vs_strain_675SK2.delta
+
+# generate a tabular coordinates file
+show-coords -rclT CS12_vs_strain_675SK2.delta > CS12_vs_strain_675SK2.coords
+
+# make a dotplot
+mummerplot --png --layout --filter --fat -p CS12_vs_strain_675SK2 CS12_vs_strain_675SK2.delta
+# render with gnuplot
+gnuplot CS12_vs_strain_675SK2.gp
+
+##################################
+# clinker: gene cluster alignments
+##################################
+
+# Note: to get regional gbk files: edit and use extract_regions_from_genbank.py 
+# example command: 
+clinker -j 1 -p clinker_plot.html \
+  CS1_2_chr_ctxmregion_258569_277931.gbk \
+  SCEC020023_chr_ctxmregion_255791_272360.gbk \
+  675SK2_chr_ctxmregion_4567919_4587284.gbk 
+
+##################################
+# PyCirclize MUMmer alignment plots
+##################################
+conda activate circos-mummer
+python mummer_plot_tune.py  # run script
+conda deactivate
+
+###############################
+# Pling: genetic-event based measure of plasmid relatedness
+# Note containment distance threshold default is 0.5, for recent transmission recommendation is 0.3
+##############################
+conda activate pling
+# Navigate to a folder containing the fasta files of the plasmids to cluster
+cd ./pling
+ls -d -1 $PWD/*.fasta > input.txt # create the input file
+pling input.txt output_dir_cd_03 align --containment_distance 0.3 --output_type both 
+
+##########################
+# MOB-Cluster
+##########################
+# Combine all the individual fasta files into one multi-fasta file in the folder to use
+cat *.fasta > mob_cluster/all_plasmids.fasta
+
+# Run mob_typer in multi-mode to generate the report mob_cluster needs
+mob_typer --multi --infile mob_cluster/all_plasmids.fasta --out_file mob_cluster/mob_typer_report.txt
+
+# Generate a taxonomy file directly from the mob_typer report
+printf "sample_id\torganism\n" > mob_cluster/taxonomy.txt
+awk -F'\t' 'NR>1 {print $1 "\tEscherichia coli"}' mob_cluster/mob_typer_report.txt | tr -d '\r' >> mob_cluster/taxonomy.txt
+
+# Run mob_cluster 
+mob_cluster --mode build -f mob_cluster/all_plasmids.fasta -p mob_cluster/mob_typer_report.txt -t mob_cluster/taxonomy.txt --outdir mob_cluster/clustering_results

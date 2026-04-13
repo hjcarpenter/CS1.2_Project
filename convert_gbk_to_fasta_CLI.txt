@@ -1,0 +1,22 @@
+# convert GenBank file to fasta:
+
+python3 - << 'EOF'
+from Bio import SeqIO
+from pathlib import Path
+
+# LIST FILES TO CONVERT:
+
+files = [
+    "CA14_region_CTX-M-15.gbk",
+    "CA28_region_CTX-M-15.gbk",
+    "675SK2_region_NDM-5.gbk",
+    "CS1_2_region_NDM-5.gbk"
+]
+
+
+for f in files:
+    record = SeqIO.read(f, "genbank")
+    fasta_out = Path(f).with_suffix(".fna")
+    SeqIO.write(record, fasta_out, "fasta")
+    print(f"wrote {fasta_out}")
+EOF

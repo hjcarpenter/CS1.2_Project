@@ -1,0 +1,18 @@
+# Autocycler Conda environment file (https://github.com/rrwick/Autocycler/tree/main/pipelines/Conda_environment_file_by_Ryan_Wick) R. Wick
+# modified for selected dependencies only
+
+name: autocycler
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - autocycler>=0.5.0            # https://github.com/rrwick/Autocycler
+  - canu>=2.3                    # https://github.com/marbl/canu
+  - flye>=2.9.6                  # https://github.com/mikolmogorov/Flye
+  - miniasm>=0.3                 # https://github.com/lh3/miniasm
+  - minimap2>=2.28               # https://github.com/lh3/minimap2
+  - minipolish>=0.2.0            # https://github.com/rrwick/Minipolish
+  - plassembler>=1.8.0           # https://github.com/gbouras13/plassembler
+  - racon>=1.5.0                 # https://github.com/lbcb-sci/racon
+  - raven-assembler>=1.8.3       # https://github.com/lbcb-sci/raven
+
