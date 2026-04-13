@@ -3,7 +3,7 @@ Scripts used in the processing and analysis of outputs from various tools used i
 
 This is a brief summary of the files and their use.
 
-# 1. Command Line Interface commands for utilised bioinformatics tools and supplementary information
+# 1. Command Line Interface: commands for utilised bioinformatics tools and supplementary information
 - **Set up information**
 - **Utilised tools and versions**
 - **Data information**
@@ -29,15 +29,15 @@ This is a brief summary of the files and their use.
   - Pling
   - MOBsuite cluster
 
-# 2. Supplementary Command Line Scripts
+**Supplementary Command Line Scripts**
 - environment.yml : this is part of the Autocycler conda installation pipeline
-- autocycler_bash.sh : file to run Autocycler
+- autocycler_bash.sh : file to run Autocycler with dependency modifications
 - extract_regions_from_genbank.py : script to extract specified loci by coordinates from genbank files
 - convert_gbk_to_fasta_CLI.txt : Call to convert specified gbk files to fasta files
 - mummer_plot_tune.py : mummer circos plot (synteny) for a single query/ref pair
 - mummer_plot_batch.py : batch option for mummer circos plots 
 
-# 3. Python Scripts: Cleaning and Processing Data
+# 2. Python Scripts: Cleaning and Processing Data
 ## A: VIRULENCE
 - unify_virulence.py: clean and combine outputs from virulence gene detection tools 
 ## B: AMR
@@ -57,14 +57,14 @@ This is a brief summary of the files and their use.
 - GENE_extract_from_blast_out.py: Takes the genbank output of a blastN search, searches for accessions containing a specific “GENE”, extracts these accessions with their metadata and creates filtered genbank and fasta files for just these accessions.
 - Process_local_blast_CS12ctxm15region_in_CTXM_plasmids.py: takes output of a local blastN of the CTXM15 region from the chromosome of CS1.2 (query) against a database of CTXM15-containing plasmid homologue hits. Adds in metadata. Flags those containing NDM5, filters out chromosomal hits and filters for high identity hits with available dates. 
 
-# 4. Python Plotting Scripts
+# 3. Python Plotting Scripts
 - LINEAR_dnafeatures_viewer.py: Creates linear gene plots for specified regions from the flagged annotation csv.
 - plasmid_pycirclize_map.py: Pycirclize circos plot of plasmid based on flagged annotation CSV
 - BRIG_multi_arrows.py: Create BRIG-like plots for plasmids
 - Chromosome_GC_plot_final.py: Create a pyCirclize circos plot of the chromosome with GC content and AMR/ virulence feature flags
 - pling_plasmid_distance_matrix.py: create a cluster heatmap from the Pling distance matrix
 
-# Supplementary
+# 4. Supplementary
 - split_data_by_contig.py: Splits the Bakta output, AMR and virulence results by contig to facilitate annotation csv generation in Excel.
 - Flagged annotation CSVs used for plotting in this project
 - Fasta files for the final assembly (full), the chromosome and the IncF plasmid
